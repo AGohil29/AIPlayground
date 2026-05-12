@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.camera)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.segmentation.selfie)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

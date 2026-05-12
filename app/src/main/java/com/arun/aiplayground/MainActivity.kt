@@ -10,9 +10,11 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -22,6 +24,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.mlkit.vision.common.InputImage
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewFinder: PreviewView
@@ -36,6 +40,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Camera permission is required to detect objects.", Toast.LENGTH_LONG).show()
         }
     }
+    private lateinit var selfieSegmenter: SelfieSegmenter
+    private lateinit var overlay: PersonaOverlay // Your Custom View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +54,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         viewFinder = findViewById(R.id.viewFinder)
+        overlay = findViewById(R.id.personaOverlay)
+
+        // Initialize the segmenter with the callback
+        selfieSegmenter = SelfieSegmenter()
 
         requestPermissions()
     }
@@ -97,6 +107,7 @@ class MainActivity : AppCompatActivity() {
             // 3. Setup Image Analysis (The code you provided)
             val imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .build()
                 .also {
 //                    it.setAnalyzer(ContextCompat.getMainExecutor(this), ObjectAnalyzer { bitmaps ->
@@ -107,27 +118,61 @@ class MainActivity : AppCompatActivity() {
 //                        }
 //                    })
                     // text analyzer
-                    it.setAnalyzer(
-                        ContextCompat.getMainExecutor(this),
-                        TranslationAnalyzer(TranslationLogic { value ->
-                            Log.d("TAG", "Detected text: $value")
-                        })
-                    )
+//                    it.setAnalyzer(
+//                        ContextCompat.getMainExecutor(this),
+//                        TranslationAnalyzer(TranslationLogic { value ->
+//                            Log.d("TAG", "Detected text: $value")
+//                        })
+//                    )
+                    // selfie analyzer
+                    it.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+                        Log.d("ML_DEBUG", "1. Analyzer received frame")
+                        processImageProxy(imageProxy)
+                    }
                 }
 
             // 4. Bind to Lifecycle
             try {
                 cameraProvider.unbindAll()   // Unbind use cases before rebinding
+//                cameraProvider.bindToLifecycle(
+//                    this, // The LifecycleOwner (MainActivity)
+//                    CameraSelector.DEFAULT_BACK_CAMERA,
+//                    preview,
+//                    imageAnalysis
+//                )
                 cameraProvider.bindToLifecycle(
-                    this, // The LifecycleOwner (MainActivity)
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    this,
+                    CameraSelector.DEFAULT_FRONT_CAMERA,
                     preview,
-                    imageAnalysis
-                )
+                    imageAnalysis)
             } catch (e: Exception) {
                 Log.e("CameraX", "Binding failed", e)
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    @OptIn(ExperimentalGetImage::class)
+    private fun processImageProxy(imageProxy: ImageProxy) {
+        val bitmapFrame = imageProxy.toBitmap() // Extension function to convert YUV to RGB
+        val mediaImage = imageProxy.image ?: return
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val inputImage = InputImage.fromMediaImage(mediaImage, rotation)
+        if (inputImage != null) {
+            selfieSegmenter.processImage(inputImage) { maskedBitmap ->
+                if (::overlay.isInitialized) {
+                    runOnUiThread {
+                        try {
+                            overlay.updateData(maskedBitmap, bitmapFrame, rotation)
+                        } catch (e: Exception) {
+                            Log.e("ML_DEBUG", "Crash in callback: ${e.message}")
+                        }
+                    }
+                } else {
+                    Log.e("ML_DEBUG", "Overlay view is null or not initialized!")
+                }
+            }
+        }
+        imageProxy.close()
     }
 }
