@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
         selfieSegmenter = SelfieSegmenter()
 
         requestPermissions()
+        // just testing mirror push
     }
 
     private fun requestPermissions() {
